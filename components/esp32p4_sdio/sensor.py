@@ -26,3 +26,5 @@ async def to_code(config):
     
     parent = await cg.get_variable(config[CONF_SD_CARD_ID])
     cg.add(var.set_parent(parent))
+    cg.add(parent.add_sensor(var))
+
