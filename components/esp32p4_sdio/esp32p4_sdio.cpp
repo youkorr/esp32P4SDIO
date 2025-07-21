@@ -1,6 +1,4 @@
 #include "esp32p4_sdio.h"
-#include "text_sensor.h"
-#include "sensor.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
@@ -58,9 +56,8 @@ void ESP32P4SDIOComponent::setup() {
     return;
   }
 
-  // Initialisation du slot spécifique
-  sdmmc_host_slot_t slot_id = this->slot_ == 0 ? SDMMC_HOST_SLOT_0 : SDMMC_HOST_SLOT_1;
-  ret = sdmmc_host_init_slot(slot_id, &slot_config);
+  // Initialisation du slot spécifique - correction ici
+  ret = sdmmc_host_init_slot(this->host_.slot, &slot_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize SDMMC slot %d: %s", this->slot_, esp_err_to_name(ret));
     this->mark_failed();
@@ -264,15 +261,8 @@ std::string ESP32P4SDIOComponent::get_card_info() {
   return std::string(info);
 }
 
-void ESP32P4SDIOComponent::add_text_sensor(ESP32P4SDIOTextSensor *sensor) {
-  this->text_sensors_.push_back(sensor);
-}
-
-void ESP32P4SDIOComponent::add_sensor(ESP32P4SDIOSensor *sensor) {
-  this->sensors_.push_back(sensor);
-}
-
 }  // namespace esp32p4_sdio
 }  // namespace esphome
+
 
 
