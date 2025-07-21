@@ -4,7 +4,7 @@ from esphome.const import CONF_ID
 from esphome import pins
 
 DEPENDENCIES = ["esp32"]
-CODEOWNERS = ["@votre-nom"]
+CODEOWNERS = ["@youkorr"]
 
 esp32p4_sdio_ns = cg.esphome_ns.namespace("esp32p4_sdio")
 ESP32P4SDIOComponent = esp32p4_sdio_ns.class_("ESP32P4SDIOComponent", cg.Component)
@@ -17,6 +17,7 @@ CONF_CLK_PIN = "clk_pin"
 CONF_CMD_PIN = "cmd_pin"
 CONF_FREQUENCY = "frequency"
 CONF_MOUNT_POINT = "mount_point"
+CONF_SLOT = "slot"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(ESP32P4SDIOComponent),
@@ -28,6 +29,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_CMD_PIN): pins.gpio_output_pin_schema,
     cv.Optional(CONF_FREQUENCY, default="20MHz"): cv.frequency,
     cv.Optional(CONF_MOUNT_POINT, default="/sdcard"): cv.string,
+    cv.Optional(CONF_SLOT, default=1): cv.int_range(min=0, max=1),
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
@@ -44,3 +46,5 @@ async def to_code(config):
     ))
     cg.add(var.set_frequency(config[CONF_FREQUENCY]))
     cg.add(var.set_mount_point(config[CONF_MOUNT_POINT]))
+    cg.add(var.set_slot(config[CONF_SLOT]))
+
