@@ -1,4 +1,6 @@
 #include "esp32p4_sdio.h"
+#include "text_sensor.h"
+#include "sensor.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
@@ -17,22 +19,30 @@ namespace esp32p4_sdio {
 static const char *const TAG = "esp32p4_sdio";
 
 void ESP32P4SDIOComponent::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up ESP32-P4 SDIO...");
+  ESP_LOGCONFIG(TAG, "Setting up ESP32-P4 SDIO MicroSD on Slot %d...", this->slot_);
   
+  // Vérifier que les pins sont configurées
+  if (this->clk_pin_ == nullptr || this->cmd_pin_ == nullptr || 
+      this->dat0_pin_ == nullptr || this->dat1_pin_ == nullptr ||
+      this->dat2_pin_ == nullptr || this->dat3_pin_ == nullptr) {
+    ESP_LOGE(TAG, "SDIO pins not properly configured");
+    this->mark_failed();
+    return;
+  }
+
   // Configuration du host SDMMC
   this->host_ = SDMMC_HOST_DEFAULT();
+  this->host_.slot = this->slot_ == 0 ? SDMMC_HOST_SLOT_0 : SDMMC_HOST_SLOT_1;
   this->host_.max_freq_khz = this->frequency_ / 1000;
   
   // Configuration des slots
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-  
-  // Configuration des pins
-  slot_config.gpio_cd = GPIO_NUM_NC;     // Card detect non utilisé
-  slot_config.gpio_wp = GPIO_NUM_NC;     // Write protect non utilisé
-  slot_config.width = 4;                 // Mode 4-bit
+  slot_config.gpio_cd = GPIO_NUM_NC;
+  slot_config.gpio_wp = GPIO_NUM_NC;
+  slot_config.width = 4;
   slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
   
-  // Assignation des pins spécifiques ESP32-P4
+  // Assignation des pins
   slot_config.clk = (gpio_num_t)this->clk_pin_->get_pin();
   slot_config.cmd = (gpio_num_t)this->cmd_pin_->get_pin();
   slot_config.d0 = (gpio_num_t)this->dat0_pin_->get_pin();
@@ -40,17 +50,19 @@ void ESP32P4SDIOComponent::setup() {
   slot_config.d2 = (gpio_num_t)this->dat2_pin_->get_pin();
   slot_config.d3 = (gpio_num_t)this->dat3_pin_->get_pin();
 
-  // Initialisation du host
+  // Initialisation du host si pas déjà fait
   esp_err_t ret = sdmmc_host_init();
-  if (ret != ESP_OK) {
+  if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
     ESP_LOGE(TAG, "Failed to initialize SDMMC host: %s", esp_err_to_name(ret));
     this->mark_failed();
     return;
   }
 
-  ret = sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config);
+  // Initialisation du slot spécifique
+  sdmmc_host_slot_t slot_id = this->slot_ == 0 ? SDMMC_HOST_SLOT_0 : SDMMC_HOST_SLOT_1;
+  ret = sdmmc_host_init_slot(slot_id, &slot_config);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize SDMMC slot: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "Failed to initialize SDMMC slot %d: %s", this->slot_, esp_err_to_name(ret));
     this->mark_failed();
     return;
   }
@@ -68,44 +80,59 @@ void ESP32P4SDIOComponent::setup() {
   
   if (ret != ESP_OK) {
     if (ret == ESP_FAIL) {
-      ESP_LOGE(TAG, "Failed to mount filesystem. If you want to format the card, set format_if_mount_failed = true.");
+      ESP_LOGE(TAG, "Failed to mount SD filesystem on slot %d. Card may need formatting.", this->slot_);
     } else {
-      ESP_LOGE(TAG, "Failed to initialize SD card: %s", esp_err_to_name(ret));
+      ESP_LOGE(TAG, "Failed to initialize SD card on slot %d: %s", this->slot_, esp_err_to_name(ret));
     }
     this->mark_failed();
     return;
   }
 
   this->mounted_ = true;
-  ESP_LOGI(TAG, "SD card mounted successfully at %s", this->mount_point_.c_str());
+  ESP_LOGI(TAG, "MicroSD mounted successfully on slot %d at %s", this->slot_, this->mount_point_.c_str());
   
   // Affichage des informations de la carte
-  ESP_LOGI(TAG, "SD card info:");
-  ESP_LOGI(TAG, "  Name: %s", this->card_->cid.name);
-  
-  // Détection du type de carte basée sur la capacité
-  const char* card_type;
-  if (this->card_->is_mmc) {
-    card_type = "MMC";
-  } else if (this->card_->ocr & (1 << 30)) {  // CCS bit pour SDHC/SDXC
-    card_type = "SDHC/SDXC";
-  } else {
-    card_type = "SDSC";
+  if (this->card_ != nullptr) {
+    ESP_LOGI(TAG, "SD card info:");
+    ESP_LOGI(TAG, "  Name: %s", this->card_->cid.name);
+    
+    // Détection du type de carte
+    const char* card_type;
+    if (this->card_->is_mmc) {
+      card_type = "MMC";
+    } else if (this->card_->ocr & (1 << 30)) {  // CCS bit pour SDHC/SDXC
+      card_type = "SDHC/SDXC";
+    } else {
+      card_type = "SDSC";
+    }
+    ESP_LOGI(TAG, "  Type: %s", card_type);
+    
+    ESP_LOGI(TAG, "  Speed: %s", (this->card_->csd.tr_speed > 25000000) ? "high speed" : "default speed");
+    ESP_LOGI(TAG, "  Size: %lluMB", ((uint64_t) this->card_->csd.capacity) * this->card_->csd.sector_size / (1024 * 1024));
   }
-  ESP_LOGI(TAG, "  Type: %s", card_type);
-  
-  ESP_LOGI(TAG, "  Speed: %s", (this->card_->csd.tr_speed > 25000000) ? "high speed" : "default speed");
-  ESP_LOGI(TAG, "  Size: %lluMB", ((uint64_t) this->card_->csd.capacity) * this->card_->csd.sector_size / (1024 * 1024));
 }
 
 void ESP32P4SDIOComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "ESP32-P4 SDIO:");
-  ESP_LOGCONFIG(TAG, "  CLK Pin: %d", this->clk_pin_->get_pin());
-  ESP_LOGCONFIG(TAG, "  CMD Pin: %d", this->cmd_pin_->get_pin());
-  ESP_LOGCONFIG(TAG, "  DAT0 Pin: %d", this->dat0_pin_->get_pin());
-  ESP_LOGCONFIG(TAG, "  DAT1 Pin: %d", this->dat1_pin_->get_pin());
-  ESP_LOGCONFIG(TAG, "  DAT2 Pin: %d", this->dat2_pin_->get_pin());
-  ESP_LOGCONFIG(TAG, "  DAT3 Pin: %d", this->dat3_pin_->get_pin());
+  ESP_LOGCONFIG(TAG, "  Slot: %d", this->slot_);
+  if (this->clk_pin_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  CLK Pin: %d", this->clk_pin_->get_pin());
+  }
+  if (this->cmd_pin_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  CMD Pin: %d", this->cmd_pin_->get_pin());
+  }
+  if (this->dat0_pin_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  DAT0 Pin: %d", this->dat0_pin_->get_pin());
+  }
+  if (this->dat1_pin_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  DAT1 Pin: %d", this->dat1_pin_->get_pin());
+  }
+  if (this->dat2_pin_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  DAT2 Pin: %d", this->dat2_pin_->get_pin());
+  }
+  if (this->dat3_pin_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  DAT3 Pin: %d", this->dat3_pin_->get_pin());
+  }
   ESP_LOGCONFIG(TAG, "  Frequency: %.1f MHz", this->frequency_ / 1000000.0f);
   ESP_LOGCONFIG(TAG, "  Mount Point: %s", this->mount_point_.c_str());
   ESP_LOGCONFIG(TAG, "  Status: %s", this->mounted_ ? "Mounted" : "Failed");
@@ -237,6 +264,15 @@ std::string ESP32P4SDIOComponent::get_card_info() {
   return std::string(info);
 }
 
+void ESP32P4SDIOComponent::add_text_sensor(ESP32P4SDIOTextSensor *sensor) {
+  this->text_sensors_.push_back(sensor);
+}
+
+void ESP32P4SDIOComponent::add_sensor(ESP32P4SDIOSensor *sensor) {
+  this->sensors_.push_back(sensor);
+}
+
 }  // namespace esp32p4_sdio
 }  // namespace esphome
+
 
