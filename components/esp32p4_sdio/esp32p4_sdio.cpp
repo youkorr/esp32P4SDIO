@@ -9,6 +9,7 @@
 #include "driver/sdmmc_host.h"
 #include "driver/sdspi_host.h"
 #include "sdmmc_cmd.h"
+#include "ff.h"
 
 namespace esphome {
 namespace esp32p4_sdio {
@@ -81,7 +82,18 @@ void ESP32P4SDIOComponent::setup() {
   // Affichage des informations de la carte
   ESP_LOGI(TAG, "SD card info:");
   ESP_LOGI(TAG, "  Name: %s", this->card_->cid.name);
-  ESP_LOGI(TAG, "  Type: %s", (this->card_->ocr & SD_OCR_SDHC_CAP) ? "SDHC/SDXC" : "SDSC");
+  
+  // Détection du type de carte basée sur la capacité
+  const char* card_type;
+  if (this->card_->is_mmc) {
+    card_type = "MMC";
+  } else if (this->card_->ocr & (1 << 30)) {  // CCS bit pour SDHC/SDXC
+    card_type = "SDHC/SDXC";
+  } else {
+    card_type = "SDSC";
+  }
+  ESP_LOGI(TAG, "  Type: %s", card_type);
+  
   ESP_LOGI(TAG, "  Speed: %s", (this->card_->csd.tr_speed > 25000000) ? "high speed" : "default speed");
   ESP_LOGI(TAG, "  Size: %lluMB", ((uint64_t) this->card_->csd.capacity) * this->card_->csd.sector_size / (1024 * 1024));
 }
@@ -117,22 +129,19 @@ size_t ESP32P4SDIOComponent::get_free_space() {
 
   FATFS *fs;
   DWORD fre_clust;
-  DWORD fre_sect;
-  DWORD tot_sect;
 
   // Obtenir les informations du système de fichiers
-  esp_err_t ret = f_getfree("0:", &fre_clust, &fs);
-  if (ret != FR_OK) {
-    ESP_LOGE(TAG, "Failed to get filesystem info");
+  FRESULT res = f_getfree("0:", &fre_clust, &fs);
+  if (res != FR_OK) {
+    ESP_LOGE(TAG, "Failed to get filesystem info: %d", res);
     return 0;
   }
 
-  // Calculer l'espace libre
-  tot_sect = (fs->n_fatent - 2) * fs->csize;
-  fre_sect = fre_clust * fs->csize;
+  // Calculer l'espace libre en secteurs
+  DWORD fre_sect = fre_clust * fs->csize;
 
-  // Convertir en MB
-  return (fre_sect * fs->ssize) / (1024 * 1024);
+  // Convertir en MB (en supposant des secteurs de 512 bytes)
+  return (size_t)((fre_sect * 512ULL) / (1024 * 1024));
 }
 
 bool ESP32P4SDIOComponent::read_file(const std::string &path, std::string &content) {
@@ -154,12 +163,18 @@ bool ESP32P4SDIOComponent::read_file(const std::string &path, std::string &conte
   long file_size = ftell(f);
   fseek(f, 0, SEEK_SET);
 
+  if (file_size < 0) {
+    ESP_LOGE(TAG, "Failed to get file size: %s", full_path.c_str());
+    fclose(f);
+    return false;
+  }
+
   // Lire le contenu
   content.resize(file_size);
   size_t read_bytes = fread(&content[0], 1, file_size, f);
   fclose(f);
 
-  if (read_bytes != file_size) {
+  if (read_bytes != (size_t)file_size) {
     ESP_LOGE(TAG, "Failed to read complete file: %s", full_path.c_str());
     return false;
   }
@@ -199,11 +214,21 @@ std::string ESP32P4SDIOComponent::get_card_info() {
     return "SD card not available";
   }
 
+  // Détection du type de carte
+  const char* card_type;
+  if (this->card_->is_mmc) {
+    card_type = "MMC";
+  } else if (this->card_->ocr & (1 << 30)) {  // CCS bit pour SDHC/SDXC
+    card_type = "SDHC/SDXC";
+  } else {
+    card_type = "SDSC";
+  }
+
   char info[300];
   snprintf(info, sizeof(info), 
     "Name: %s, Type: %s, Speed: %s, Size: %lluMB, Free: %zuMB",
     this->card_->cid.name,
-    (this->card_->ocr & SD_OCR_SDHC_CAP) ? "SDHC/SDXC" : "SDSC",
+    card_type,
     (this->card_->csd.tr_speed > 25000000) ? "High Speed" : "Default Speed",
     ((uint64_t) this->card_->csd.capacity) * this->card_->csd.sector_size / (1024 * 1024),
     this->get_free_space()
@@ -214,3 +239,4 @@ std::string ESP32P4SDIOComponent::get_card_info() {
 
 }  // namespace esp32p4_sdio
 }  // namespace esphome
+
