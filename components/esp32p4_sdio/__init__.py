@@ -4,7 +4,7 @@ from esphome.const import CONF_ID
 from esphome import pins
 
 DEPENDENCIES = ["esp32"]
-CODEOWNERS = ["@youkorr"]
+CODEOWNERS = ["@votre-nom"]
 
 esp32p4_sdio_ns = cg.esphome_ns.namespace("esp32p4_sdio")
 ESP32P4SDIOComponent = esp32p4_sdio_ns.class_("ESP32P4SDIOComponent", cg.Component)
@@ -47,4 +47,5 @@ async def to_code(config):
     cg.add(var.set_frequency(config[CONF_FREQUENCY]))
     cg.add(var.set_mount_point(config[CONF_MOUNT_POINT]))
     cg.add(var.set_slot(config[CONF_SLOT]))
+
 
