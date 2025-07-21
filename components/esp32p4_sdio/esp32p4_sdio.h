@@ -9,9 +9,6 @@
 namespace esphome {
 namespace esp32p4_sdio {
 
-class ESP32P4SDIOTextSensor;
-class ESP32P4SDIOSensor;
-
 class ESP32P4SDIOComponent : public Component {
  public:
   void setup() override;
@@ -30,10 +27,6 @@ class ESP32P4SDIOComponent : public Component {
   bool read_file(const std::string &path, std::string &content);
   bool write_file(const std::string &path, const std::string &content);
   std::string get_card_info();
-  
-  // Méthodes pour les capteurs
-  void add_text_sensor(ESP32P4SDIOTextSensor *sensor);
-  void add_sensor(ESP32P4SDIOSensor *sensor);
 
  protected:
   InternalGPIOPin *dat0_pin_{nullptr};
@@ -50,11 +43,9 @@ class ESP32P4SDIOComponent : public Component {
   
   sdmmc_card_t *card_{nullptr};
   sdmmc_host_t host_;
-  
-  std::vector<ESP32P4SDIOTextSensor *> text_sensors_;
-  std::vector<ESP32P4SDIOSensor *> sensors_;
 };
 
 }  // namespace esp32p4_sdio
 }  // namespace esphome
+
 
